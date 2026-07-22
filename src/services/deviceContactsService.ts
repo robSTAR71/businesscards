@@ -1,31 +1,33 @@
-import { Contact as DeviceContact, getPermissionsAsync, requestPermissionsAsync } from 'expo-contacts';
-import type { CreateContactRecord } from 'expo-contacts';
+import * as ExpoContacts from 'expo-contacts';
 import type { Contact } from '../types/contact';
 
 async function ensurePermission(): Promise<boolean> {
-  const existing = await getPermissionsAsync();
+  const existing = await ExpoContacts.getPermissionsAsync();
   if (existing.granted) return true;
-  const requested = await requestPermissionsAsync();
+  const requested = await ExpoContacts.requestPermissionsAsync();
   return requested.granted;
 }
 
-function toDeviceRecord(contact: Contact): CreateContactRecord {
+function toDeviceRecord(contact: Contact): ExpoContacts.Contact {
   const noteParts = [contact.notes, contact.tags.length > 0 ? `Tags: ${contact.tags.join(', ')}` : undefined].filter(
-    Boolean
+    (part): part is string => Boolean(part)
   );
+  const fullName = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.organization || '';
 
   return {
-    givenName: contact.firstName,
-    familyName: contact.lastName,
+    contactType: ExpoContacts.ContactTypes.Person,
+    name: fullName,
+    firstName: contact.firstName,
+    lastName: contact.lastName,
     company: contact.organization,
     jobTitle: contact.jobTitle,
-    phones: contact.phones.map((p) => ({ label: p.label, number: p.number })),
-    emails: contact.emails.map((e) => ({ label: e.label, address: e.address })),
+    phoneNumbers: contact.phones.map((p) => ({ label: p.label, number: p.number })),
+    emails: contact.emails.map((e) => ({ label: e.label, email: e.address })),
     addresses: contact.addresses.map((a) => ({
       label: a.label,
       street: a.street,
       city: a.city,
-      postcode: a.postalCode,
+      postalCode: a.postalCode,
       country: a.country,
     })),
     urlAddresses: contact.website ? [{ label: 'work', url: contact.website }] : undefined,
@@ -50,13 +52,11 @@ export async function syncContactToDevice(contact: Contact): Promise<string> {
 
   if (contact.deviceContactId) {
     try {
-      await new DeviceContact(contact.deviceContactId).update(record);
-      return contact.deviceContactId;
+      return await ExpoContacts.updateContactAsync({ id: contact.deviceContactId, ...record });
     } catch {
       // The device contact may have been deleted since the last sync — create a fresh one below.
     }
   }
 
-  const created = await DeviceContact.create(record);
-  return created.id;
+  return ExpoContacts.addContactAsync(record);
 }
