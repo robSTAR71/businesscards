@@ -106,7 +106,8 @@ export class RemoteOcrService implements CardVisionService {
     });
 
     if (!response.ok) {
-      throw new Error(`OCR-Dienst antwortete mit Status ${response.status}`);
+      const body = await response.text();
+      throw new Error(`OCR-Dienst antwortete mit Status ${response.status}: ${body}`);
     }
 
     const json = await response.json();

@@ -62,7 +62,11 @@ describe('RemoteOcrService', () => {
   });
 
   it('throws a clear error on a non-ok response', async () => {
-    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500 }) as unknown as typeof fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => 'internal error',
+    }) as unknown as typeof fetch;
 
     const service = new RemoteOcrService('https://example.com/ocr');
     await expect(service.extractContact({ base64Image: 'x', mediaType: 'image/jpeg' })).rejects.toThrow('500');
