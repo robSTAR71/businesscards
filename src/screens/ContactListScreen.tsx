@@ -13,7 +13,7 @@ const FILTERS: { label: string; value: ContextLabel | undefined }[] = [
   { label: 'Alle', value: undefined },
   { label: 'Beruflich', value: 'beruflich' },
   { label: 'Privat', value: 'privat' },
-  { label: 'Mischung', value: 'mischung' },
+  { label: 'Bi', value: 'mischung' },
 ];
 
 export default function ContactListScreen({ navigation }: Props) {
@@ -73,6 +73,9 @@ export default function ContactListScreen({ navigation }: Props) {
       <View style={styles.bottomBar}>
         <TouchableOpacity style={styles.secondaryButton} onPress={handleExportAll}>
           <Text style={styles.secondaryButtonText}>Alle exportieren</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => navigation.navigate('GalleryImport')}>
+          <Text style={styles.secondaryButtonText}>Aus Galerie</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('Capture')}>
           <Text style={styles.primaryButtonText}>Karte scannen</Text>

@@ -3,6 +3,7 @@
     "name": "businesscards",
     "slug": "businesscards",
     "version": "1.0.0",
+    "scheme": "businesscards",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -32,6 +33,12 @@
         "expo-image-picker",
         {
           "photosPermission": "Diese App benötigt Zugriff auf deine Fotos, um Visitenkarten aus der Galerie zu importieren."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Diese App benötigt Zugriff auf deine Kontakte, um gescannte Visitenkarten dort zu speichern."
         }
       ]
     ]

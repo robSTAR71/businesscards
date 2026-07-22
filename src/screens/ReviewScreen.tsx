@@ -1,12 +1,16 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import type { AddressEntry, Contact, ContextLabel, EmailEntry, FieldSource, PhoneEntry } from '../types/contact';
 import { ListFieldEditor } from '../components/ListFieldEditor';
-import { getContact, insertContact, updateContact } from '../db/contactRepository';
+import { getContact, insertContact, listContacts, updateContact } from '../db/contactRepository';
 import { suggestContextLabel } from '../utils/contextLabelHeuristic';
+import { findPotentialDuplicates, type DuplicateReason } from '../utils/duplicateDetection';
 import { shareContact } from '../services/vcardShare';
+import { syncContactToDevice } from '../services/deviceContactsService';
+import { useGoogleContactsSync } from '../hooks/useGoogleContactsSync';
+import { presentNextPhoto } from '../navigation/photoQueue';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Review'>;
 
@@ -14,7 +18,7 @@ const CONTEXT_LABELS: ContextLabel[] = ['beruflich', 'privat', 'mischung'];
 const CONTEXT_LABEL_TITLES: Record<ContextLabel, string> = {
   beruflich: 'Beruflich',
   privat: 'Privat',
-  mischung: 'Mischung',
+  mischung: 'Bi',
 };
 
 function sourceHint(fieldSources: Partial<Record<string, FieldSource>>, field: string): string {
@@ -24,9 +28,16 @@ function sourceHint(fieldSources: Partial<Record<string, FieldSource>>, field: s
   return '';
 }
 
+const DUPLICATE_REASON_LABEL: Record<DuplicateReason, string> = {
+  email: 'E-Mail-Adresse',
+  phone: 'Telefonnummer',
+  name: 'Name',
+};
+
 export default function ReviewScreen({ route, navigation }: Props) {
   const params = route.params ?? {};
   const isEditingExisting = 'contactId' in params;
+  const googleContactsSync = useGoogleContactsSync();
 
   const existingContact = useMemo(
     () => (isEditingExisting ? getContact((params as { contactId: string }).contactId) : null),
@@ -40,6 +51,12 @@ export default function ReviewScreen({ route, navigation }: Props) {
   const photoUri = isEditingExisting
     ? existingContact?.photoFrontUri
     : (params as { photoUri?: string }).photoUri;
+  const remainingQueue = isEditingExisting ? undefined : (params as { remainingQueue?: string[] }).remainingQueue;
+  const queueTotal = isEditingExisting ? undefined : (params as { queueTotal?: number }).queueTotal;
+  const queueProgress =
+    remainingQueue && queueTotal ? `Karte ${queueTotal - remainingQueue.length} von ${queueTotal}` : undefined;
+
+  const [processingNext, setProcessingNext] = useState(false);
 
   const [firstName, setFirstName] = useState(initialData.firstName ?? '');
   const [lastName, setLastName] = useState(initialData.lastName ?? '');
@@ -105,33 +122,121 @@ export default function ReviewScreen({ route, navigation }: Props) {
     };
   };
 
-  const handleSave = () => {
-    const payload = buildContactPayload();
-    if (!payload.firstName && !payload.lastName && !payload.organization) {
-      Alert.alert('Fehlende Angabe', 'Bitte mindestens einen Namen oder eine Firma eintragen.');
-      return;
-    }
-
-    if (isEditingExisting && existingContact) {
-      updateContact({ ...existingContact, ...payload });
+  const advanceOrFinish = async () => {
+    if (remainingQueue && remainingQueue.length > 0 && queueTotal) {
+      setProcessingNext(true);
+      await presentNextPhoto(navigation, remainingQueue, queueTotal);
     } else {
-      insertContact(payload);
+      navigation.navigate('ContactList');
     }
-    navigation.goBack();
   };
 
-  const handleSaveAndShare = () => {
-    const payload = buildContactPayload();
-    const saved =
-      isEditingExisting && existingContact ? updateContact({ ...existingContact, ...payload }) : insertContact(payload);
+  /**
+   * Validates, checks for likely duplicates (new contacts only), and inserts/updates.
+   * Resolves to null if the user should not proceed (missing name, or cancelled on a duplicate
+   * warning) — callers must bail out without sharing/syncing/advancing in that case.
+   */
+  const confirmAndSave = (): Promise<Contact | null> => {
+    return new Promise((resolve) => {
+      const payload = buildContactPayload();
+      if (!payload.firstName && !payload.lastName && !payload.organization) {
+        Alert.alert('Fehlende Angabe', 'Bitte mindestens einen Namen oder eine Firma eintragen.');
+        resolve(null);
+        return;
+      }
+
+      const proceed = () => {
+        const saved =
+          isEditingExisting && existingContact
+            ? updateContact({ ...existingContact, ...payload })
+            : insertContact(payload);
+        resolve(saved);
+      };
+
+      if (!isEditingExisting) {
+        const duplicates = findPotentialDuplicates(payload, listContacts(), existingContact?.id);
+        if (duplicates.length > 0) {
+          const match = duplicates[0];
+          const name =
+            [match.contact.firstName, match.contact.lastName].filter(Boolean).join(' ') ||
+            match.contact.organization ||
+            'Unbenannt';
+          Alert.alert(
+            'Möglicher Duplikat-Kontakt',
+            `„${name}" ist bereits gespeichert (gleiche ${DUPLICATE_REASON_LABEL[match.reason]}). Trotzdem als neuen Kontakt speichern?`,
+            [
+              { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(null) },
+              { text: 'Trotzdem speichern', onPress: proceed },
+            ]
+          );
+          return;
+        }
+      }
+
+      proceed();
+    });
+  };
+
+  const handleSave = async () => {
+    const saved = await confirmAndSave();
+    if (saved) advanceOrFinish();
+  };
+
+  const handleSaveAndShare = async () => {
+    const saved = await confirmAndSave();
+    if (!saved) return;
     shareContact(saved).catch((error) =>
       Alert.alert('Teilen fehlgeschlagen', error instanceof Error ? error.message : 'Unbekannter Fehler.')
     );
-    navigation.goBack();
+    advanceOrFinish();
   };
+
+  const handleSaveAndSyncDevice = async () => {
+    const saved = await confirmAndSave();
+    if (!saved) return;
+    syncContactToDevice(saved)
+      .then((deviceContactId) => updateContact({ ...saved, deviceContactId }))
+      .catch((error) =>
+        Alert.alert('Übernahme fehlgeschlagen', error instanceof Error ? error.message : 'Unbekannter Fehler.')
+      );
+    advanceOrFinish();
+  };
+
+  const handleSaveAndSyncGoogle = async () => {
+    if (!googleContactsSync.isConfigured) {
+      Alert.alert(
+        'Google Contacts nicht konfiguriert',
+        'Es ist keine Google-OAuth-Client-ID hinterlegt (EXPO_PUBLIC_GOOGLE_OAUTH_CLIENT_ID). Details im README.'
+      );
+      return;
+    }
+    const saved = await confirmAndSave();
+    if (!saved) return;
+    googleContactsSync
+      .syncContact(saved)
+      .then(({ resourceName }) => updateContact({ ...saved, googleResourceName: resourceName }))
+      .catch((error) =>
+        Alert.alert('Google-Sync fehlgeschlagen', error instanceof Error ? error.message : 'Unbekannter Fehler.')
+      );
+    advanceOrFinish();
+  };
+
+  const handleSkip = () => {
+    advanceOrFinish();
+  };
+
+  if (processingNext) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" />
+        <Text style={styles.processingText}>Nächste Karte wird verarbeitet …</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {queueProgress && <Text style={styles.queueProgress}>{queueProgress}</Text>}
       {photoUri && <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="cover" />}
 
       <Field label={`Vorname${sourceHint(fieldSources, 'firstName')}`} value={firstName} onChangeText={setFirstName} />
@@ -192,6 +297,17 @@ export default function ReviewScreen({ route, navigation }: Props) {
       <TouchableOpacity style={styles.secondaryButton} onPress={handleSaveAndShare}>
         <Text style={styles.secondaryButtonText}>Speichern & als vCard teilen</Text>
       </TouchableOpacity>
+      <TouchableOpacity style={styles.secondaryButton} onPress={handleSaveAndSyncDevice}>
+        <Text style={styles.secondaryButtonText}>Speichern & in Telefon-Kontakte übernehmen</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.secondaryButton} onPress={handleSaveAndSyncGoogle}>
+        <Text style={styles.secondaryButtonText}>Speichern & zu Google Contacts</Text>
+      </TouchableOpacity>
+      {remainingQueue && remainingQueue.length > 0 && (
+        <TouchableOpacity style={styles.secondaryButton} onPress={handleSkip}>
+          <Text style={styles.secondaryButtonText}>Diese Karte überspringen</Text>
+        </TouchableOpacity>
+      )}
     </ScrollView>
   );
 }
@@ -225,6 +341,9 @@ function Field({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
+  center: { flex: 1, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center', gap: 12 },
+  processingText: { color: '#666' },
+  queueProgress: { fontSize: 12, fontWeight: '600', color: '#0a7ea4', marginBottom: 10 },
   content: { padding: 16, paddingBottom: 48 },
   photo: { width: '100%', height: 180, borderRadius: 12, marginBottom: 16, backgroundColor: '#eee' },
   fieldContainer: { marginBottom: 12 },

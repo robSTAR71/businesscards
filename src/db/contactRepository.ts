@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import * as Crypto from 'expo-crypto';
-import { CREATE_CONTACTS_TABLE } from './schema';
+import { COLUMN_MIGRATIONS, CREATE_CONTACTS_TABLE } from './schema';
 import type { Contact, ContextLabel, NewContact } from '../types/contact';
 
 const DB_NAME = 'businesscards.db';
@@ -11,6 +11,13 @@ function getDb(): SQLite.SQLiteDatabase {
   if (!db) {
     db = SQLite.openDatabaseSync(DB_NAME);
     db.execSync(CREATE_CONTACTS_TABLE);
+    for (const statement of COLUMN_MIGRATIONS) {
+      try {
+        db.execSync(statement);
+      } catch {
+        // Column already exists on a database created before this migration was added.
+      }
+    }
   }
   return db;
 }
@@ -36,6 +43,8 @@ interface ContactRow {
   photoFrontUri: string | null;
   photoBackUri: string | null;
   fieldSources: string;
+  deviceContactId: string | null;
+  googleResourceName: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -57,6 +66,8 @@ function rowToContact(row: ContactRow): Contact {
     photoFrontUri: row.photoFrontUri ?? undefined,
     photoBackUri: row.photoBackUri ?? undefined,
     fieldSources: JSON.parse(row.fieldSources),
+    deviceContactId: row.deviceContactId ?? undefined,
+    googleResourceName: row.googleResourceName ?? undefined,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -75,8 +86,8 @@ export function insertContact(contact: NewContact): Contact {
     `INSERT INTO contacts
       (id, firstName, lastName, organization, jobTitle, phones, emails, addresses,
        website, notes, contextLabel, tags, photoFrontUri, photoBackUri, fieldSources,
-       createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       deviceContactId, googleResourceName, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       full.id,
       full.firstName ?? null,
@@ -93,6 +104,8 @@ export function insertContact(contact: NewContact): Contact {
       full.photoFrontUri ?? null,
       full.photoBackUri ?? null,
       JSON.stringify(full.fieldSources),
+      full.deviceContactId ?? null,
+      full.googleResourceName ?? null,
       full.createdAt,
       full.updatedAt,
     ]
@@ -108,7 +121,7 @@ export function updateContact(contact: Contact): Contact {
     `UPDATE contacts SET
       firstName = ?, lastName = ?, organization = ?, jobTitle = ?, phones = ?, emails = ?,
       addresses = ?, website = ?, notes = ?, contextLabel = ?, tags = ?, photoFrontUri = ?,
-      photoBackUri = ?, fieldSources = ?, updatedAt = ?
+      photoBackUri = ?, fieldSources = ?, deviceContactId = ?, googleResourceName = ?, updatedAt = ?
      WHERE id = ?`,
     [
       updated.firstName ?? null,
@@ -125,6 +138,8 @@ export function updateContact(contact: Contact): Contact {
       updated.photoFrontUri ?? null,
       updated.photoBackUri ?? null,
       JSON.stringify(updated.fieldSources),
+      updated.deviceContactId ?? null,
+      updated.googleResourceName ?? null,
       updated.updatedAt,
       updated.id,
     ]

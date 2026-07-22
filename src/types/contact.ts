@@ -37,6 +37,10 @@ export interface Contact {
   photoBackUri?: string;
   /** Tracks which source produced each top-level field, shown in the review screen. */
   fieldSources: Partial<Record<string, FieldSource>>;
+  /** Set once this contact has been written to the phone's native address book, so re-sync updates instead of duplicating. */
+  deviceContactId?: string;
+  /** Set once this contact has been created in Google Contacts, so re-sync updates instead of duplicating. */
+  googleResourceName?: string;
   createdAt: string;
   updatedAt: string;
 }

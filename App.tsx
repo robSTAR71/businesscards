@@ -7,6 +7,7 @@ import type { RootStackParamList } from './src/navigation/types';
 import { initDb } from './src/db/contactRepository';
 import ContactListScreen from './src/screens/ContactListScreen';
 import CaptureScreen from './src/screens/CaptureScreen';
+import GalleryImportScreen from './src/screens/GalleryImportScreen';
 import ReviewScreen from './src/screens/ReviewScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -22,6 +23,7 @@ export default function App() {
         <Stack.Navigator initialRouteName="ContactList">
           <Stack.Screen name="ContactList" component={ContactListScreen} options={{ title: 'Kontakte' }} />
           <Stack.Screen name="Capture" component={CaptureScreen} options={{ title: 'Karte scannen' }} />
+          <Stack.Screen name="GalleryImport" component={GalleryImportScreen} options={{ title: 'Galerie-Import' }} />
           <Stack.Screen name="Review" component={ReviewScreen} options={{ title: 'Kontakt prüfen' }} />
         </Stack.Navigator>
       </NavigationContainer>
