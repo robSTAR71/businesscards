@@ -1,0 +1,5 @@
+name = "businesscards-ocr-worker"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+
+# Set the real secret with: wrangler secret put ANTHROPIC_API_KEY
