@@ -107,7 +107,6 @@ export default {
       body: JSON.stringify({
         model: ANTHROPIC_MODEL,
         max_tokens: 1024,
-        temperature: 0,
         messages: [
           {
             role: 'user',
